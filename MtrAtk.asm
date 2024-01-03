@@ -1,0 +1,1014 @@
+IDEAL
+MODEL small
+STACK 100h
+DATASEG
+
+temp3 dw 20 dup (?)
+flagX db 0
+flagy db 0
+MeteorDirectionX dw 50 dup (0,1,-1)
+MeteorDirectionY dw 50 dup (1)
+meteorx dw 50 dup (?)
+meteory dw 50 dup (5)
+meteor_color db 50 dup (5)
+meteor_bool db 50 dup (0)
+NumOfMeteors dw 1
+MeteorSpeedX dw 1
+Level dw 1
+NumOfPointsToLvlUP dw 5
+temp_radios dw ?
+temp_outerloop db ?
+temp_counter dw ?
+radios_of_meteor db 10
+starting_meteorx dw ?
+starting_meteory dw ?
+ReturnAddress dw ?
+edgesx dw ? 
+edgesy dw ?
+edges_color_sides db 49;0Ah ;green
+edges_color_up&down db 0Ah ;green
+loopvar dw ?
+loopvar2 dw ?
+SizeOfSPaceShip dw 9
+color db 0Ah
+Color_Of_Space_Ship db 0Bh ; cyan
+shipx dw 160 ;space ship x cordinate
+shipy dw 170 ;space ship pixel y
+IndexOfLaser dw 0
+SecondLaserIndex dw 0
+laser_color db 25 dup (?)
+laser_bool db 25 dup (0) 
+laserx dw 25 dup (5) 
+lasery dw 25 dup (5)
+NumOfLasers dw ?
+cloak dw ?
+temp_cloak dw 0
+Clock equ es:6Ch
+random_counter dw 1
+OriginalSi dw ?
+OriginalDi dw ?
+note dw 700h
+temp dw ?
+
+lifes db 3
+score db 0
+points dw 0
+SecondDigit db 0
+ThirdDigit db 0
+DisplayScore db 'score:', '$'
+DisplayFirstDigit db '0', '$'
+DisplaySecondDigit db '0', '$'
+DisplayThirdDigit db '0', '$'
+DisplayLifes db 'lifes:', '$'
+DisplayNumOfLifes db '3', '$' 
+
+filename db 'screen.bmp',0
+filename2 db 'gmover.bmp',0
+filename3 db 'nxtlvl.bmp', 0
+filehandle dw ?
+Header db 54 dup (0)
+Palette db 256*4 dup (0)
+ScrLine db 320 dup (0)
+ErrorMsg db 'Error', 13, 10 ,'$'
+
+MeteorMove dw 1 ;skip the movment of the meteor every 1/MeteorMove times
+move dw 1 ; laser moves half the times
+diffrent_rand dw 1
+
+CODESEG
+
+proc mul_di
+	mov ax,2
+	mul si
+	mov di, ax
+	ret
+endp mul_di
+
+proc delay
+	MOV     CX, 00H
+	MOV     DX, 4240H
+	MOV     AH, 86H
+	INT     15H
+	
+	ret
+endp delay
+ 
+
+proc sound_delay
+	push cx
+    mov cx,60
+    delay12:
+    push cx
+    mov cx,60
+    delay21:
+    loop delay21
+    pop cx
+    loop delay12
+
+    pop cx
+	  ret
+endp sound_delay
+
+proc random         ; generate x position to the meteor
+	mov ax, 40h
+	mov es, ax
+	RandLoop:
+	; generate random number
+	mov ax, [Clock] ; read timer counter
+	mov ah, [byte cs:bx] ; read one byte from memory
+	xor al, ah ; xor memory and counter
+	and al, 11111111b ; leave result between 0-255
+	mov ah, 0
+	inc bx
+	;ror al, cl
+	ror al, 4
+	cmp ax, 150
+	jg RandLoop
+	mov bx, 2
+	mul bx
+	cmp ax, 4 ;edge
+	jl RandLoop
+	cmp di, 0
+	je first_meteor
+	cmp ax, [meteorx+di-2]
+	je RandLoop
+	cmp ax, [temp_cloak]
+	je RandLoop
+	mov [temp_cloak], ax
+	first_meteor:
+	
+	mov [meteorx+di], ax
+	ret 
+endp random
+
+proc recreate_meteor
+	mov ax, 40h
+	mov es, ax
+	inc bx
+	; generate random number
+	mov ax, [Clock] ; read timer counter
+	mov ah, [byte cs:bx] ; read one byte from memory
+	xor al, ah ; xor memory and counter
+	and al, 00011111b ; leave result between 0-31
+	mov ah, 0	
+	inc bx
+	
+	cmp ax, [random_counter]
+	jne no_new_meteor
+	
+	inc [random_counter]
+	cmp [random_counter],31
+	jne skip11
+	mov [random_counter],0
+skip11:
+	mov [temp], si
+	mov cx, di
+	mov si, -1
+loop4:
+	inc si
+	call mul_di
+	cmp si,[NumOfMeteors]
+	je no_new_meteor
+	cmp [meteor_bool + si], 1
+	jne loop4
+	mov [meteor_bool + si], 0
+	mov [meteory + di], 10
+	call rand_Direction
+	call random
+no_new_meteor:
+	mov si, [temp]
+	mov di, cx
+	ret
+endp recreate_meteor
+
+proc rand_Direction
+	
+	mov ax, 40h
+	mov es, ax
+	RandLoop2:
+	inc bx
+	; generate random number
+	mov ax, [Clock] ; read timer counter
+	mov ah, [byte cs:bx] ; read one byte from memory
+	xor al, ah ; xor memory and counter
+	and al, 00000011b ; leave result between 0-4
+	mov ah, 0	
+	inc bx
+	
+	cmp ax, [diffrent_rand]
+	je RandLoop2
+	mov [diffrent_rand], ax
+	
+	cmp ax, 3
+	je RandLoop2
+	cmp ax, 0
+	jne nextrand
+	mov [MeteorDirectionX + di], 0 ; down
+	jmp end_meteor_direction
+nextrand:
+	cmp ax, 1
+	jne nextrand2
+	mov ax, [MeteorSpeedX]
+	mov [MeteorDirectionX + di], ax ; right + speed
+	jmp end_meteor_direction
+nextrand2:
+	mov ax, [MeteorSpeedX]
+	neg ax
+	mov [MeteorDirectionX + di], ax ;left + speed
+end_meteor_direction:
+	ret
+endp rand_Direction
+
+proc printSpaceShip
+	pop [ReturnAddress]
+	pop ax ;size of spaceship
+	mov [color], al
+	mov dx, 0
+	mov ax, [SizeOfSPaceShip]
+	mov [loopvar], ax
+	mov bx, 2
+	div bx
+	sub [shipx], ax
+	;dec [shipx]
+	inc ax
+	mov [loopvar2], ax
+	
+	add [shipy], ax
+	
+outerloop:
+	mov ax, [loopvar]
+	mov [temp], ax
+loop20:
+	mov bh,0h
+	mov cx,[shipx]
+	mov dx, [shipy]
+	mov al, [color]
+	mov ah,0ch
+	int 10h
+	inc [shipx]
+	dec [loopvar]
+	cmp [loopvar],0
+	jne loop20
+	mov ax, [temp]
+	mov [loopvar], ax
+	sub [shipx], ax
+	sub [loopvar], 2
+	inc [shipx]
+	dec [shipy]
+	dec [loopvar2]
+	cmp [loopvar2], 0
+	jne outerloop	
+
+	dec [shipx]
+	push [ReturnAddress]
+	ret
+endp printSpaceShip
+
+
+proc edges
+	mov [edgesx],0
+	mov [edgesy], 0
+edge_up:
+	mov bh,0h
+	mov cx, [edgesx]
+	mov dx, [edgesy]
+	mov al, [edges_color_up&down]; color of edges
+	mov ah,0ch
+	int 10h
+	inc [edgesx]
+	cmp [edgesx], 320
+	jne edge_up
+	
+	mov [edgesy], 199
+edge_down: 
+	mov cx, [edgesx]
+	mov dx, [edgesy]
+	int 10h
+	dec [edgesx]
+	cmp [edgesx], 0
+	jne edge_down
+	
+	mov al, [edges_color_sides]
+edge_left:
+	mov cx, [edgesx]
+	mov dx, [edgesy]
+	int 10h
+	dec [edgesy]
+	cmp [edgesy], 0
+	jne edge_left
+
+	mov [edgesx], 319
+edge_right:
+	mov cx, [edgesx]
+	mov dx, [edgesy]
+	int 10h
+	inc [edgesy]
+	cmp [edgesy], 199
+	jne edge_right
+
+	ret
+endp edges
+
+proc laser
+	mov [OriginalSi], si
+	mov [OriginalDi], di
+	mov si, [IndexOfLaser]
+	call mul_di
+	cmp [laser_bool  + si],0
+	je end_of_proc ;skip
+skip:
+	mov [loopvar], 5
+	add [lasery + di], 5
+delete_laser:
+	mov bh,0h
+	mov cx, [laserx + di]
+	mov dx, [lasery + di]
+	mov al,0 ;black
+	mov ah,0ch
+	int 10h
+	dec [lasery + di]
+	dec [loopvar]
+	cmp [loopvar], 0
+	jne delete_laser
+	
+
+	; check if the laser is at the edge of the map
+	cmp [lasery + di], 5
+	jle end_of_laser
+	
+	mov [loopvar], 5
+	sub [lasery + di],1
+draw_laser:	; create new laser
+	mov bh,0h
+	mov cx, [laserx + di]
+	mov dx, [lasery + di]
+	mov al,[laser_color + si]
+	mov ah,0ch
+	int 10h
+	dec [loopvar]
+	dec [lasery + di]
+	cmp [loopvar], 0
+	jne draw_laser
+	
+
+	jmp end_of_proc
+	
+end_of_laser:
+	mov [laser_bool + si],0
+	
+end_of_proc:
+	mov si, [OriginalSi]
+	mov di, [OriginalDi]
+	ret 
+endp laser
+
+proc Level_Up
+	pop [ReturnAddress]
+	mov dx, offset filename3
+	call OpenFile
+	call ReadHeader
+	call ReadPalette
+	call CopyPal
+	call CopyBitmap
+	
+	mov ah, 1
+	int 21h
+	mov ax, 13h ; graphic mode
+	int 10h
+	
+	mov si, 0
+	mov di, 0
+looplabel:
+	call print_meteor
+	inc si 
+	call mul_di
+	dec [NumOfMeteors]
+	cmp [NumOfMeteors], 0
+	jne looplabel
+	mov [NumOfMeteors], 1
+	mov ax, [Level]
+	mov [MeteorSpeedX], ax ; speed is based on the level
+	mov si, 0
+	mov cx, 50
+	mov [MeteorDirectionY], ax ;speed based on the level
+Reset_Meteors_Nextlvl:
+	mov [meteor_bool + si], 1
+	mov ax, [Level]
+	mov [MeteorDirectionY + di], ax
+	inc si
+	call mul_di
+	loop Reset_Meteors_Nextlvl
+	mov si, 0
+	mov di, 0
+	push [ReturnAddress]
+	ret
+endp Level_Up
+
+proc check_meteor
+	mov ax,[meteorx+di] ; starting x and y of the meteor
+	mov [starting_meteorx],ax
+	mov ax, [meteory+di]
+	mov [starting_meteory], ax
+	
+	mov bl,[radios_of_meteor] ; temp radios
+	mov [temp_outerloop],bl
+
+	column4:
+	mov bl, [radios_of_meteor]
+	square4:
+	mov bh,0h
+	mov cx,[meteorx+di]
+	mov dx,[meteory+di]
+	mov ah, 0Dh
+	int 10h
+	cmp al,01Fh ;laser color
+	je touch_with_laser
+	jmp next1 
+touch_with_laser:
+	call sound
+	mov [meteor_color+si], 0
+	mov [meteor_bool+si], 1
+	mov ax,[starting_meteorx]
+	mov [meteorx+di], ax
+	mov ax, [starting_meteory]
+	mov [meteory+di], ax
+	
+	inc [score]			;the laser has hit the meteor score + 1
+	inc [points]
+	call update_points
+	
+	mov al, [score]
+	mov ah, 0
+	mov bl, 5
+	div bl
+	cmp ah, 0
+	jne NextLevel
+	inc [NumOfMeteors]
+	mov bx, [NumOfPointsToLvlUP]
+	cmp [points] , bx
+	jne NextLevel
+	inc [Level]
+	call Level_Up
+	jmp startx
+NextLevel:
+
+continue:
+	jmp end_meteor2
+	
+next1:
+	cmp al, [Color_Of_Space_Ship] ;ship color
+	jne next2
+	call sound
+	mov [meteor_color+si], 0
+	mov [meteor_bool+si], 1
+	mov ax,[starting_meteorx]
+	mov [meteorx+di], ax
+	mov ax, [starting_meteory]
+	mov [meteory+di], ax
+	
+	dec [lifes]
+	call update_points
+	cmp [lifes], 0
+	jne skip8
+	jmp exit
+skip8:
+	jmp end_meteor2
+next2:
+	cmp al, [edges_color_sides] ;interaction with edges (sides)
+	jne touch_with_edges
+	mov [flagX], 1
+touch_with_edges:
+	
+	cmp al, [edges_color_up&down]
+	jne touch_with_edges2
+	mov [flagY], 1
+touch_with_edges2:
+
+	inc [meteorx+di]
+	dec bl
+	cmp bl,0
+	je skip15
+	jmp square4
+skip15:
+	mov ax, [temp_radios]
+	sub [meteorx+di], ax 
+	inc [meteory+di]
+	dec [temp_outerloop]
+	cmp [temp_outerloop], 0
+	je skip7
+	jmp column4
+skip7:
+	mov al, [radios_of_meteor]
+	mov ah,0
+	sub [meteory+di],ax
+	
+	mov [meteor_color+si],5
+	
+	cmp [flagX], 1
+	jne no_change_direction
+	neg [MeteorDirectionX + di]
+	cmp [meteorx + di], 1   ; bug fix
+	jg no_change_direction
+	add [meteorx + di], 1
+no_change_direction:
+	cmp [flagY], 1
+	jne end_meteor2
+	neg [MeteorDirectionY + di]
+end_meteor2:
+	mov [flagX],0
+	mov [flagY], 0
+
+	ret
+endp check_meteor
+
+proc print_meteor
+	
+	mov bl,[radios_of_meteor] ; temp radios
+	mov [temp_outerloop],bl
+
+	column5:
+	mov bl, [radios_of_meteor]
+	square5:
+	mov bh,0h
+	mov cx,[meteorx+di]
+	mov dx,[meteory+di]
+	mov al, 0
+	mov ah,0ch
+	int 10h
+	inc [meteorx+di]
+	dec bl
+	cmp bl,0
+	jne square5
+	mov ax, [temp_radios]
+	sub [meteorx+di], ax 
+	inc [meteory+di]
+	dec [temp_outerloop]
+	cmp [temp_outerloop], 0
+	jne column5
+	ret 
+endp print_meteor
+
+
+proc meteor
+
+	call print_meteor ; delete previos meteor	
+	mov cx, [MeteorDirectionX + di]
+	add [meteorx + di], cx
+	
+	mov al, [radios_of_meteor]
+	mov ah,0
+	
+	sub [meteory+di],ax
+	mov cx, [MeteorDirectionY + di]
+	add [meteory+di],cx
+	mov bl,[radios_of_meteor] ; temp radios
+	mov [temp_outerloop],bl
+	
+	column6:
+	mov bl, [radios_of_meteor]
+	square6:
+	mov bh,0h
+	mov cx,[meteorx+di]
+	mov dx,[meteory+di]
+	mov al, [meteor_color+si]
+	mov ah,0ch
+	int 10h
+	inc [meteorx+di]
+	dec bl
+	cmp bl,0
+	jne square6
+	mov ax, [temp_radios]
+	sub [meteorx+di], ax 
+	inc [meteory+di]
+	dec [temp_outerloop]
+	cmp [temp_outerloop], 0
+	jne column6
+	sub [meteory+di],ax
+	
+
+	ret
+endp meteor
+
+
+
+proc sound
+	; open speaker
+	in al, 61h
+	or al, 00000011b
+	out 61h, al
+	mov cx,15000
+loop5:
+	; send control word to change frequency
+	mov al, 0B6h
+	out 43h, al
+	; play frequency 131Hz
+	mov ax, [note]
+	out 42h, al ; Sending lower byte
+	mov al, ah
+	out 42h, al ; Sending upper byte
+	loop loop5
+	call  sound_delay
+	; close the speaker
+	in al, 61h
+	and al, 11111100b
+	out 61h, al
+
+
+	ret
+endp sound
+
+proc points&lifes
+	mov ah,02h
+    mov bh,00h
+    mov dh,01h     ;The height where the points are 
+    mov dl,09h     ;The length where the points are
+    int 10h
+
+    mov ah,09h
+    lea dx, [DisplayFirstDigit]
+    int 21h
+
+	mov ah,02h
+    mov bh,00h
+    mov dh,01h     ;The height where the points are 
+    mov dl,08h     ;The length where the points are
+    int 10h
+
+    mov ah,09h
+    lea dx, [DisplaySecondDigit]
+    int 21h
+	
+		mov ah,02h
+    mov bh,00h
+    mov dh,01h     ;The height where the points are 
+    mov dl,07h     ;The length where the points are
+    int 10h
+
+    mov ah,09h
+    lea dx, [DisplayThirdDigit]
+    int 21h
+	
+	
+	mov ah,02h
+    mov bh,00h
+    mov dh,01h     ;The height where the points are 
+    mov dl,01h     ;The length where the points are
+    int 10h
+
+    mov ah,09h
+    lea dx, [DisplayScore]
+    int 21h
+	
+	
+	mov ah,02h
+    mov bh,00h
+    mov dh,01h     ;The height where the points are 
+    mov dl,020h     ;The length where the points are
+    int 10h
+
+    mov ah,09h
+    lea dx, [DisplayLifes]
+    int 21h
+	
+	mov ah,02h
+    mov bh,00h
+    mov dh,01h     ;The height where the points are 
+    mov dl,026h     ;The length where the points are
+    int 10h
+
+    mov ah,09h
+    lea dx, [DisplayNumOfLifes]
+    int 21h
+	
+	ret
+endp points&lifes
+
+proc update_points
+	mov ax, 0
+	cmp [score], 10
+	jne LowerBites
+	mov [score],0
+	inc [SecondDigit]
+	cmp [SecondDigit], 10
+	jne Continue1
+	mov [SecondDigit], 0
+	inc [ThirdDigit]
+	mov al, [ThirdDigit]
+	add al, 30h
+	mov [DisplayThirdDigit], al
+Continue1:
+	mov al, [SecondDigit]
+	add al, 30h
+	mov [DisplaySecondDigit], al
+LowerBites:
+	mov al, [score]
+	add al, 30h
+	mov [DisplayFirstDigit], al
+	
+	mov al, [lifes]	
+	add al, 30h
+	mov [DisplayNumOfLifes], al
+	ret
+endp update_points
+
+proc OpenFile
+	; Open file
+	mov ah, 3Dh
+	xor al, al
+	int 21h
+	jc openerror
+	mov [filehandle], ax
+	ret
+	openerror :
+	mov dx, offset ErrorMsg
+	mov ah, 9h
+	int 21h
+	ret
+endp OpenFile
+
+
+proc ReadHeader
+	; Read BMP file header, 54 bytes
+	mov ah,3fh
+	mov bx, [filehandle]
+	mov cx,54
+	mov dx,offset Header
+	int 21h
+	ret
+endp ReadHeader
+
+proc ReadPalette
+	; Read BMP file color palette, 256 colors * 4 bytes (400h)
+	mov ah,3fh
+	mov cx,400h
+	mov dx,offset Palette
+	int 21h
+	ret
+endp ReadPalette
+
+proc CopyPal
+	; Copy the colors palette to the video memory
+	; The number of the first color should be sent to port 3C8h
+	; The palette is sent to port 3C9h
+	mov si,offset Palette
+	mov cx,256
+	mov dx,3C8h
+	mov al,0
+	; Copy starting color to port 3C8h
+	out dx,al
+	; Copy palette itself to port 3C9h
+	inc dx
+	PalLoop:
+	; Note: Colors in a BMP file are saved as BGR values rather than RGB .
+	mov al,[si+2] ; Get red value .
+	shr al,2 ; Max. is 255, but video palette maximal
+	; value is 63. Therefore dividing by 4.
+	out dx,al ; Send it .
+	mov al,[si+1] ; Get green value .
+	shr al,2
+	out dx,al ; Send it .
+	mov al,[si] ; Get blue value .
+	shr al,2
+	out dx,al ; Send it .
+	add si,4 ; Point to next1 color .
+	loop PalLoop
+	ret
+endp CopyPal; (There is a null chr. after every color.)
+
+
+proc CopyBitmap
+	; BMP graphics are saved upside-down .
+	; Read the graphic line by line (200 lines in VGA format),
+	; displaying the lines from bottom to top.
+	mov ax, 0A000h
+	mov es, ax
+	mov cx,200
+	PrintBMPLoop :
+	push cx
+	; di = cx*320, point to the correct screen line
+	mov di,cx
+	shl cx,6
+	shl di,8
+	add di,cx
+	; Read one line
+	mov ah,3fh
+	mov cx,320
+	mov dx,offset ScrLine
+	int 21h
+	; Copy one line into video memory
+	cld ; Clear direction flag, for movsb
+	mov cx,320
+	mov si,offset ScrLine
+	rep movsb ; Copy line to the screen
+	 ;rep movsb is same as the following code :
+	 ;mov es:di, ds:si
+	 ;inc si
+	 ;inc di
+	 ;dec cx
+	 ;loop until cx=0
+	pop cx
+	loop PrintBMPLoop
+	ret
+endp CopyBitmap
+
+
+start:
+	mov ax, @data
+	mov ds, ax
+
+	mov ax, 13h ; graphic mode
+	int 10h
+	
+	mov al, [radios_of_meteor]
+	mov ah, 0
+	mov [temp_radios], ax 
+	
+	mov dx, offset filename
+	call OpenFile
+	call ReadHeader
+	call ReadPalette
+	call CopyPal
+	call CopyBitmap
+	
+	mov ah, 1
+	int 21h
+	
+	mov ax, 13h ; graphic mode
+	int 10h
+	
+	call edges
+	mov si,0
+	mov di, 0
+startx:
+	call random
+	inc si
+	call mul_di
+	cmp si, [NumOfMeteors]
+	jne startx
+	mov si, 0
+	mov di, 0
+WaitForData:
+	
+	inc [MeteorMove]
+	cmp [MeteorMove], 6 ;speed of the meteor, bigger = faster
+	jne meteors
+	mov [MeteorMove], 0
+	jmp DontMove
+	
+meteors:
+	cmp [meteor_bool + si], 0
+	jne no_meteor
+	call check_meteor
+	call meteor
+	call edges
+no_meteor:
+	inc si							;increase si to the am
+	call mul_di
+	cmp si,[NumOfMeteors]
+	jne meteors
+DontMove:
+	
+	call points&lifes
+	call recreate_meteor
+	mov si, 0
+	mov di, 0 
+	mov al, [Color_Of_Space_Ship]  ;0Bh  color
+	mov ah, 0	
+	push ax
+	call printSpaceShip
+	call delay
+	neg [move]
+	cmp [move], 1
+	je check_move_laser
+	mov [NumOfLasers], 15
+movelaser:
+	inc [IndexOfLaser]
+	call laser
+	dec [NumOfLasers]
+	cmp [NumOfLasers], 0
+	jne movelaser
+	mov [IndexOfLaser], 0
+check_move_laser:
+	mov ah, 1
+	int 16h
+	jz WaitForData
+	mov ah,0
+	int 16h
+	
+	cmp ah,1Eh; check if a is pressed
+	je left
+	
+	cmp ah, 20h; check if d is pressed
+	je right
+	
+	cmp ah,11h ; check if w is pressed
+	je up
+	
+	cmp ah,1Fh ; check if s is pressed
+	jne daleg
+	jmp down
+daleg:
+	cmp ah, 1h ;esc
+	je escape
+
+	cmp ah, 39h ;space
+	jne daleg5
+	jmp laser1
+daleg5:
+	
+	jmp WaitForData
+escape:
+	jmp exit
+	
+left:
+	push 0
+	call printSpaceShip
+	
+	cmp [shipx], 6 ; edge left
+	jl daleg1
+	sub [shipx], 5
+daleg1:
+	jmp WaitForData
+	
+
+right:
+	push 0
+	call printSpaceShip
+	cmp [shipx], 309 ; edge right
+	jg daleg2
+	add [shipx],5
+daleg2:
+	jmp WaitForData
+	
+up:
+	push 0
+	call printSpaceShip
+	cmp [shipy], 6 ; edge up
+	jle daleg3
+	sub [shipy],5
+daleg3:
+	jmp WaitForData
+	
+down:
+	push 0
+	call printSpaceShip
+	cmp [shipy], 185 ; edge down
+	jg daleg4
+	add [shipy],5
+daleg4:
+	jmp WaitForData
+	
+	
+laser1:	; deletes previous laser
+	mov [OriginalSi], si
+	mov [OriginalDi], di
+	mov  si, [SecondLaserIndex]
+	call mul_di
+	mov [laser_bool + si],1
+	mov [loopvar], 5
+	add [lasery + di], 5
+erase_laser:
+	mov [laser_color + si], 0 ; black 
+	mov bh,0h
+	mov cx, [laserx + di]
+	mov dx, [lasery + di]
+	mov al,[laser_color + si]
+	mov ah,0ch
+	int 10h
+	dec [lasery + di]
+	dec [loopvar]
+	cmp [loopvar], 0
+	jne erase_laser
+	mov [laser_color + si], 01Fh ; red
+	
+	
+	mov dx, [shipx]
+	mov [laserx + di], dx
+	mov ax,[shipy]
+	mov [lasery + di], ax
+	mov al,[laser_color + si]
+	inc [SecondLaserIndex]
+	cmp [SecondLaserIndex], 15
+	jne max_laser_index
+	mov [SecondLaserIndex], 0
+max_laser_index:
+	mov si, [OriginalSi]
+	mov di, [OriginalDi]
+	jmp WaitForData
+exit:
+	;game over
+	mov dx, offset filename2
+	call OpenFile
+	call ReadHeader
+	call ReadPalette
+	call CopyPal
+	call CopyBitmap
+	
+gameover:
+	mov cx, 2
+	loop gameover
+	mov ax, 4c00h
+	int 21h
+END start
+
+
