@@ -15,7 +15,7 @@ meteor_bool db 50 dup (0)
 NumOfMeteors dw 1
 MeteorSpeedX dw 1
 Level dw 1
-NumOfPointsToLvlUP dw 5
+NumOfPointsToLvlUP dw 25
 temp_radios dw ?
 temp_outerloop db ?
 temp_counter dw ?
